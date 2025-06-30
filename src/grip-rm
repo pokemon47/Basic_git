@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+
+# This program was written by Asish Balasundaram (z5430777)
+# This file is the program that removes a file from the index,
+# or, from the current directory and the index.
+
+import sys, os, filecmp
+
+# The function below is used to check if there will be any loss of work
+# if the files were removed, while also accounting for the flags given if any
+def checkForLossOfWork(filenames, isCached, isForced):
+    # Getting the current working branch name
+    curBranchReader = open('.grip/_curBranch')
+    curBranch = curBranchReader.readline()
+    curBranchReader.close()
+
+    # Getting the commit number of the latest commit in the current working branch
+    commits = sorted(map(lambda n : int(n), os.listdir(f".grip/branches/{curBranch}")))
+    # initialising the commit number to -1 to indicate that there are no commits
+    curCommitNum = -1
+    if commits != []:
+        # There are commits in the cur working branch so we now have to
+        # change the curCommitNum to the latest commit of the cur working branch
+        curCommitNum = commits[-1]
+
+
+    # now we need to check if this command would cause loss of work
+    for filename in filenames:
+        if (filename not in os.listdir('.grip/index')):
+            print(f"grip-rm: error: '{filename}' is not in the grip repository"
+                , file = sys.stderr)
+            sys.exit(1)
+        if ((filename in os.listdir('.grip/index')) and (filename not in os.listdir()) or
+            isForced):
+            # The file has been deleted from cwd but still exists in the index
+            # or the '--force' flag is given
+            # In this case, we don't check for loss of work
+            continue
+        # at this point we can be certain that file is in index and cwd
+        # Furthermore, force has been skipped too
+        curIndexFile = f".grip/index/{filename}"
+        curCommitFile = None
+        if ((curCommitNum >= 0) and
+            (filename in os.listdir(f".grip/commits/{curCommitNum}"))):
+            # We can now confirm that commits have been made and
+            # the most recent commit of the current branch has this file
+            curCommitFile = f".grip/commits/{curCommitNum}/{filename}"
+    
+        if (filecmp.cmp(filename, curIndexFile, shallow=False) and
+            (curCommitFile == None or (not filecmp.cmp(curIndexFile, curCommitFile, shallow=False))) and
+            (not isCached)):
+            # The version of the file in the cwd and index are same and
+            # (the file does not exist, or if it does exist,
+            # the version of the file in the commit and the index are different)
+            # Deleting this file from cwd and index would cause loss of work
+            print(f"grip-rm: error: '{filename}' has staged changes in the index",
+                file = sys.stderr)
+            sys.exit(1)
+        elif ((not filecmp.cmp(curIndexFile, filename, shallow=False)) and 
+            (curCommitFile == None or (not filecmp.cmp(curIndexFile, curCommitFile, shallow=False)))):
+            # The version of the file in the cwd and index are different and
+            # (the file does not exist, or if it does exist,
+            # the version of the file in the commit and the index are different)
+            # Deleting this file from index and/or cwd would cause loss of work
+            print(f"grip-rm: error: '{filename}' in index is different to both the working file and the repository"
+                , file = sys.stderr)
+            sys.exit(1)
+        elif ((not filecmp.cmp(curIndexFile, filename, shallow=False)) and 
+            (filecmp.cmp(curIndexFile, curCommitFile, shallow=False)) and
+            (not isCached)):
+            # The version of the file in the cwd and index are different and
+            # the version of the file in the commit and the index are same
+            # Deleting this file from index and cwd would cause loss of work
+            print(f"grip-rm: error: '{filename}' in the repository is different to the working file"
+                , file = sys.stderr)
+            sys.exit(1)
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    if (not os.path.isdir('.grip')):
+        # The .grip dir does not exist.
+        print('grip-rm: error: grip repository directory .grip not found',
+            file = sys.stderr)
+        sys.exit(1)
+    elif (len(args) == 0):
+        # Too few command line arguements were given
+        print('usage: grip-rm [--force] [--cached] <filenames>',
+            file = sys.stderr)
+        sys.exit(1)
+
+    # Default values initialised below if no flags are mentioned
+    isCached = False
+    isForced = False
+
+    if (args[0][:2] == '--'):
+        # There is atleast one flag given
+        # Checking if the flag matches either one of the expected flags
+        isCached = args[0] == '--cached'
+        isForced = args[0] == '--force'
+        args = args[1:]
+        if (isCached == False and isForced == False) or (len(args) == 0):
+            # The flag given does not match either of the expected flags
+            # or there were no filenames given after the flag
+            print('usage: grip-rm [--force] [--cached] <filenames>',
+                file = sys.stderr)
+            sys.exit(1)
+
+    if (args[0][:2] == '--'):
+        # There is atleast two flags given
+        # Checking if the second flag matches the '--cached' flag
+        isCached = args[0] == '--cached'
+        args = args[1:]
+        if (isCached == False or isForced == False or len(args) == 0):
+            # out of the given flags
+            # one of them does not match the expected flags in the expected order
+            # or there were no filenames given after the flags
+            print('usage: grip-rm [--force] [--cached] <filenames>',
+                file = sys.stderr)
+            sys.exit(1)
+
+    # The flags were removed from args progressively if they existed
+    filenames = args
+    # Now we check for loss of work
+    checkForLossOfWork(filenames, isCached, isForced)
+    # if this point is reached, no errors were found
+    # so we can now do the removal of files appropriately without loss of work
+    for filename in filenames:
+        os.remove(f".grip/index/{filename}")
+        if (not isCached) and (filename in os.listdir()):
+            os.remove(filename)

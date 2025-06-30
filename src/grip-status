@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+
+# This program was written by Asish Balasundaram (z5430777)
+# This file is the program that prints out the status of files
+# in the current directory, the index, and the repository
+
+import sys, os, filecmp, shutil
+
+# The function below prints out the status for a file
+# There are a total of 12 possible messages that could be printed out
+# The below are the cases for each possible message
+# Note, 'commit' refers to the latest commit of the cur working branch
+# case 1:
+# file exists in the cwd but not in the index or the commit
+# case 2:
+# file exists in the index but not in the cwd or the commit
+# case 3:
+# file exists in the commit but not in the cwd or the index
+# case 4:
+# file exists in the cwd and the index but not in the commit and
+# the version of the file in the cwd and index are the same
+# case 5:
+# file exists in the cwd and the index but not in the commit and
+# the version of the file in the cwd and index are different
+# case 6:
+# file exists in the cwd and the commit but not in the index and
+# the version of the file in the cwd and commit does not matter
+# case 7:
+# file exists in the index and the commit but not in the cwd and
+# the version of the file in the index and commit are the same
+# case 8:
+# file exists in the index and the commit but not in the cwd and
+# the version of the file in the index and commit are different
+#
+# Note, for the remaining cases
+# we can conclude that the file exists in all 3 dirs (domains = cwd, index, recentCommit)
+#
+# case 9:
+# The version of the file is the same in cwd, index, and commit
+# case 10:
+# The version of the file is the same in cwd and index but not in commit
+# case 11:
+# The version of the file is the same in cwd and commit but not in index OR
+# The version of the file is different in cwd, index, and commit
+# case 12:
+# The version of the file is the same in index and commit but not in cwd
+def statusPrinter(filename, curIndexFile, curCommitFile):
+    if ((os.path.exists(filename)) and
+        (not os.path.exists(curIndexFile)) and
+        (not os.path.exists(curCommitFile))):
+        # case 1
+        print(f"{filename} - untracked")
+    elif ((not os.path.exists(filename)) and
+        (os.path.exists(curIndexFile)) and
+        (not os.path.exists(curCommitFile))):
+        # case 2
+        print(f"{filename} - added to index, file deleted")
+    elif ((not os.path.exists(filename)) and
+        (not os.path.exists(curIndexFile)) and
+        (os.path.exists(curCommitFile))):
+        # case 3
+        print(f"{filename} - file deleted, deleted from index")
+    elif ((os.path.exists(filename)) and
+        (os.path.exists(curIndexFile)) and
+        (not os.path.exists(curCommitFile)) and 
+        (filecmp.cmp(filename, curIndexFile, shallow = False))):
+        # case 4
+        print(f"{filename} - added to index")
+    elif ((os.path.exists(filename)) and
+        (os.path.exists(curIndexFile)) and
+        (not os.path.exists(curCommitFile)) and 
+        (not filecmp.cmp(filename, curIndexFile, shallow = False))):
+        # case 5
+        print(f"{filename} - added to index, file changed")
+    elif ((os.path.exists(filename)) and
+        (not os.path.exists(curIndexFile)) and
+        (os.path.exists(curCommitFile))):
+        # case 6
+        print(f"{filename} - deleted from index")
+    elif ((not os.path.exists(filename)) and
+        (os.path.exists(curIndexFile)) and
+        (os.path.exists(curCommitFile)) and 
+        (filecmp.cmp(curIndexFile, curCommitFile, shallow = False))):
+        # case 7
+        print(f"{filename} - file deleted")
+    elif ((not os.path.exists(filename)) and
+        (os.path.exists(curIndexFile)) and
+        (os.path.exists(curCommitFile)) and 
+        (not filecmp.cmp(curIndexFile, curCommitFile, shallow = False))):
+        # case 8
+        print(f"{filename} - file deleted, changed staged for commit")
+    elif ((filecmp.cmp(filename, curIndexFile, shallow = False)) and
+        (filecmp.cmp(curIndexFile, curCommitFile, shallow = False))):
+        # case 9
+        print(f"{filename} - same as repo")
+    elif ((filecmp.cmp(filename, curIndexFile, shallow = False)) and
+        (not filecmp.cmp(curIndexFile, curCommitFile, shallow = False))):
+        # case 10
+        print(f"{filename} - file changed, changes staged for commit")
+    elif ((not filecmp.cmp(filename, curIndexFile, shallow = False)) and
+        (not filecmp.cmp(curIndexFile, curCommitFile, shallow = False))):
+        # case 11
+        print(f"{filename} - file changed, different changes staged for commit")
+    elif ((filecmp.cmp(curIndexFile, curCommitFile, shallow = False)) and
+        (not filecmp.cmp(filename, curIndexFile, shallow = False))):
+        # case 12
+        print(f"{filename} - file changed, changes not staged for commit")
+
+
+if __name__ == "__main__":
+    if (not os.path.isdir('.grip')):
+        # The .grip dir does not exist.
+        print('grip-status: error: grip repository directory .grip not found',
+            file = sys.stderr)
+        sys.exit(1)
+
+    # Getting the current working branch name
+    curBranchReader = open('.grip/_curBranch')
+    curBranch = curBranchReader.readline()
+    curBranchReader.close()
+
+    # Getting the commit number of the latest commit in the current working branch
+    commits = sorted(map(lambda n : int(n), os.listdir(f".grip/branches/{curBranch}")))
+    # initialising the commit number to -1 to indicate that there are no commits
+    curCommitNum = -1
+    if commits != []:
+        # There are commits in the cur working branch so we now have to
+        # change the curCommitNum to the latest commit of the cur working branch
+        curCommitNum = commits[-1]
+    else:
+        # Making a dummy commit with the commit Id of -1
+        # In reality, with normal functioning of the program a commit id with -1 would never be made
+        # so this would ensure that there are no duplicate commit Ids made accidentally
+        # Making this dummy commit would help us avoid repeated checks if a commit exists
+        os.mkdir('.grip/commits/-1') 
+
+    # below is a set of filenames of all the files in the cwd, index,
+    # and the latest commit of the cur working branch
+    files = set().union(set(filter(lambda a : not os.path.isdir(a),os.listdir())),
+                        set(os.listdir('.grip/index')),
+                        set(os.listdir(f".grip/commits/{curCommitNum}")))
+
+    # Go through all the files of the filenames in the set made above
+    # and print the status of each file
+    for filename in sorted(list(files)):
+        curIndexFile = f".grip/index/{filename}"
+        curCommitFile = f".grip/commits/{curCommitNum}/{filename}"
+        statusPrinter(filename, curIndexFile, curCommitFile)
+    # delete the dummy commit if it was made
+    if (os.path.exists('.grip/commits/-1')):
+        shutil.rmtree('.grip/commits/-1')

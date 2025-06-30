@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+
+# This program was written by Asish Balasundaram (z5430777)
+# This file is the program that stages the changes
+# This is done by copying the files from cwd to the index directory
+# The files that are copied over correspond to the filenames given
+
+import sys, os, re, shutil
+
+if __name__ == "__main__":
+    # Need to check if .grip exists, and only continue if it does 
+    if (not os.path.isdir('.grip')):
+        # .grip does not exist, print error message and exit
+        print('grip-add: error: grip repository directory .grip not found',
+            file = sys.stderr)
+        sys.exit(1)
+    elif (len(sys.argv) <= 1):
+        # no filenames were given to be added, print error message and exit
+        print('usage: grip-add <filenames>',
+            file = sys.stderr)
+        sys.exit(1)
+
+
+    # Before adding to the index file, need to check if filenames are valid 
+    # and also check if the file exists in the cwd or the index
+    for filename in sys.argv[1:]:
+        if (not re.search(r'^[a-zA-Z0-9]{1}[a-zA-Z0-9._-]*$'  , filename)):
+        # no filenames were given to be added, print error message and exit
+            print(f"grip-add: error: invalid filename {filename}",
+                file = sys.stderr)
+            sys.exit(1)
+        elif not (os.path.exists(filename) or os.path.exists(f".grip/index/{filename}")):
+            print(f"grip-add: error: can not open '{filename}'",
+                file = sys.stderr)
+            sys.exit(1)
+
+  # If this point is reached, there should be no more errors
+  # The changes made shall be staged for the filenames given
+    for filename in sys.argv[1:]:
+        if os.path.exists(filename):
+            # if the file exists in the cwd then add it to the index
+            shutil.copy(filename, f".grip/index/{filename}")
+        else:
+            # if the file does not exist in the cwd then remove it from the index
+            os.remove(f".grip/index/{filename}")

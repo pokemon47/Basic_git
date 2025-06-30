@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+
+# This program was written by Asish Balasundaram (z5430777)
+# This file is the program that adds the changes that have been 
+# made to the specified branch or commit to the index, and commits them.
+
+import sys, os, filecmp, shutil, re
+
+# The function compares the versions of the two files and return a boolean
+# Note, the file not existing is also considered to be a version of the file
+def safeFileCmp(file1, file2):
+    # returns true, if both files don't exist or if both exist and have same content
+    return ((not (os.path.exists(file1) or os.path.exists(file2))) or
+        (os.path.exists(file1) and os.path.exists(file2) and filecmp.cmp(file1, file2, shallow = False)))
+
+# The function below removes a file only it exists
+def safeRemove(deleteFile):
+    if (os.path.exists(deleteFile)):
+        os.remove(deleteFile)
+
+
+def checkForLocalChanges(curCommitNum, targCommitNum):
+    for filename in os.listdir(f".grip/commits/{curCommitNum}"):
+        curIndexFile = f".grip/index/{filename}"
+        curCommitFile = f".grip/commits/{curCommitNum}/{filename}"
+        targCommitFile = f".grip/commits/{targCommitNum}/{filename}"
+        if (safeFileCmp(curIndexFile, curCommitFile)):
+            # The version of the file is the same in the index and target commit
+            # so this won't ever throw "grip-merge: error: can not merge: local changes to files"
+            continue
+        elif (not safeFileCmp(curIndexFile, curCommitFile) or 
+                (os.path.exists(filename) and (not safeFileCmp(filename, curCommitFile)))):
+            # The version of the file is different in the index and current commit
+            # or the file exists in the cwd but
+            # the version of the file is different in the index and current commit
+            print('grip-merge: error: can not merge: local changes to files',
+                file = sys.stderr)
+            sys.exit(1)
+        # no other case throws the error below
+        # "grip-merge: error: can not merge: local changes to files"
+
+
+# The function below checks if the merging of the two commits would
+# cause any loss of work
+def checkForLossOfWork(baseCommitNum, curCommitNum, targCommitNum):
+    errorFiles = []
+    for filename in files:
+        baseCommitFile = f".grip/commits/{baseCommitNum}/{filename}"
+        curCommitFile = f".grip/commits/{curCommitNum}/{filename}"
+        targCommitFile = f".grip/commits/{targCommitNum}/{filename}"
+        if not (safeFileCmp(baseCommitFile, curCommitFile) or 
+            safeFileCmp(baseCommitFile, targCommitFile) or
+            safeFileCmp(curCommitFile, targCommitFile)):
+            errorFiles.append(filename)
+  
+    if (len(errorFiles) > 0):
+        print('grip-merge: error: These files can not be merged:',
+            file = sys.stderr)
+        for filename in errorFiles:
+            print(filename, file = sys.stderr)
+        sys.exit(1)
+
+# The function below does fastforwarding of the current working branch if
+# the merge does not require a commit to be made
+def doFastForward(baseCommitNum, curCommitNum, targCommitNum):
+    # It is a fastforward commit, no additonal commit made
+    for filename in os.listdir(f".grip/commits/{curCommitNum}"):
+        curIndexFile = f".grip/index/{filename}"
+        targCommitFile = f".grip/commits/{targCommitNum}/{filename}"
+        if (not os.path.exists(targCommitFile)):
+            # the file does not exist in the the targ commit
+            # which means it was deleted in that commit initially
+            # so those files need to be deleted in the cwd as well
+            safeRemove(filename)
+  
+    # deleting the current index and
+    # making a copy of the targ commit as the new index
+    # basically refreshing the index to be the same as targ commit
+    shutil.rmtree('.grip/index')
+    shutil.copytree(f".grip/commits/{targCommitNum}", '.grip/index')
+
+    # copying the contents of the file from the targ commit to cwd
+    for filename in os.listdir(f".grip/commits/{targCommitNum}"):
+        targCommitFile = f".grip/commits/{targCommitNum}/{filename}"
+        shutil.copy(targCommitFile, filename)
+    print('Fast-forward: no commit created')
+    sys.exit(0)
+
+# The function below does merge when the merge requires a commit to be made
+def makeMergeCommit(baseCommitNum, curCommitNum, targCommitNum):
+    # Getting the number of the new commit to be made
+    lastCommit = sorted(map(lambda n : int(n), os.listdir('.grip/commits')))[-1]
+    newCommitNum = lastCommit + 1
+
+    # Making the commit refrence directory
+    os.mkdir(f".grip/branches/{curBranch}/{newCommitNum}")
+
+    # writing the path to the commit in the ref dir of the targetBranch
+    commitPathRef = open(f".grip/branches/{curBranch}/{newCommitNum}/commitPath",'w')
+    commitPathRef.write(f".grip/branches/{curBranch}/{newCommitNum}")
+    commitPathRef.close()
+
+    # writing the commit message in the ref dir of the branch
+    commitMsgWriter = open(f".grip/branches/{curBranch}/{newCommitNum}/commitMsg",'w')
+    commitMsgWriter.write(args[2])
+    commitMsgWriter.close()
+
+    # making a copy of the current commit as the new commit first
+    # so the new commit is the same as cur commit for now
+    shutil.copytree(f".grip/commits/{curCommitNum}", f".grip/commits/{newCommitNum}")
+    # will now make changes to the new commit based on targetCommit
+    for filename in os.listdir(f".grip/commits/{targCommitNum}"):
+        targCommitFile = f".grip/commits/{targCommitNum}/{filename}"
+        baseCommitFile = f".grip/commits/{baseCommitNum}/{filename}"
+        newCommitFile = f".grip/commits/{newCommitNum}/{filename}"
+        if (safeFileCmp(newCommitFile, baseCommitFile) or 
+            (os.path.exists(targCommitFile) and not os.path.exists(newCommitFile))):
+            # The version of the file is the same in cur commit and base commit
+            # Or the file exists in the targ commit but not in the cur commit
+            shutil.copy(targCommitFile, newCommitFile)
+
+    # deleting the files in cur commit and cwd which were there in base commit
+    # but not in the targ commit
+    for filename in os.listdir(f".grip/commits/{baseCommitNum}"):
+        newCommitFile = f".grip/commits/{newCommitNum}/{filename}"
+        targCommitFile = f".grip/commits/{targCommitNum}/{filename}"
+        if (not os.path.exists(targCommitFile)):
+            safeRemove(newCommitFile)
+            safeRemove(filename)
+
+    # the new commit has the correct contents of each file as intended
+    # deleting the current index and
+    # making a copy of the new commit as the new index
+    # basically refreshing the index to be the same as new commit
+    shutil.rmtree('.grip/index')
+    shutil.copytree(f".grip/commits/{newCommitNum}", '.grip/index')
+
+    # copying the contents of the file from the targ commit to cwd
+    for filename in os.listdir(f".grip/commits/{newCommitNum}"):
+        newCommitFile = f".grip/commits/{newCommitNum}/{filename}"
+        shutil.copy(newCommitFile, filename)
+    print(f"Committed as commit {newCommitNum}")
+
+if __name__ == "__main__":
+    if (not os.path.isdir('.grip')):
+        # The .grip dir does not exist.
+        print('grip-merge: error: grip repository directory .grip not found',
+            file = sys.stderr)
+        sys.exit(1)
+    elif (os.listdir('.grip/commits') == []):
+        # No commits have been made so far,
+        # this program requires atleast 1 commit to be made
+        print('grip-merge: error: this command can not be run until after the first commit',
+            file = sys.stderr)
+        sys.exit(1)
+
+    args = sys.argv[1:]
+    if ((len(args) == 1 and args[0] != '-m') or (len(args) == 2 and args[1] == '-m')):
+        # The input given does not have a commit message
+        print('grip-merge: error: empty commit message',
+            file = sys.stderr)
+        sys.exit(1)
+    elif (len(args) != 3 or 
+        args[1] != '-m' or 
+        args[0] == '' or 
+        args[0][0] == '-'  or 
+        (not re.search(r'^[a-zA-Z0-9]{1}[a-zA-Z0-9._-]*$'  , args[2]))):
+        # The input given was not well formed, does not match the expected format
+        print('usage: grip-merge <branch|commit> -m message',
+            file = sys.stderr)
+        sys.exit(1)
+    elif (re.search(r'^[0-9]*$' , args[0]) and
+        (args[0] not in os.listdir('.grip/commits'))):
+        # The commit to merge from does not exist
+        print(f"grip-merge: error: unknown commit '{args[0]}'",
+            file = sys.stderr)
+        sys.exit(1)
+    elif (re.search(r'^[a-zA-Z0-9]{1}[a-zA-Z0-9._-]*$' , args[0]) and
+        (args[0] not in os.listdir('.grip/branches'))):
+        # The branch to merge from does not exist
+        print(f"grip-merge: error: unknown branch '{args[0]}'",
+            file = sys.stderr)
+        sys.exit(1)
+  
+    # If this point is reached, there should be no more input error
+
+    # Getting the current working branch name
+    curBranchReader = open('.grip/_curBranch')
+    curBranch = curBranchReader.readline()
+    curBranchReader.close()
+
+    # Getting the latest commit of the cur working branch
+    curCommitNum = sorted(map(lambda n : int(n), os.listdir(f".grip/branches/{curBranch}")))[-1]
+    # Getting the commit to merge from
+    targetCommitNum = -1
+    if (re.search(r'^[0-9]*$' , args[0])):
+        targetCommitNum = args[0]
+    else:
+        targCommitNum = sorted(map(lambda n : int(n), os.listdir(f".grip/branches/{args[0]}")))[-1]
+
+
+    # 5 possibile cases
+    # 1) Already up to date (if target Commit already in curBranch log)
+    if (targCommitNum in os.listdir(f".grip/branches/{curBranch}")):
+        # The commit to merge from is already in the 
+        # cur working branch's log (history of commits made to the branch)
+        print('Already up to date')
+        sys.exit(0)
+
+    # 2) grip-merge: error: can not merge: local changes to files
+    checkForLocalChanges(curCommitNum, targCommitNum)
+
+    # 3) grip-merge: error: These files can not be merged:
+
+    # Getting the base commit of the cur commit and targ commit
+    # base commit is the last commit that the two branches had in common
+    curBranchCommits = sorted(map(lambda n : int(n), os.listdir(f".grip/branches/{curBranch}")),
+        reverse = True)
+    baseCommitNum = curCommitNum 
+    for curBranchCommit in curBranchCommits:
+        if curBranchCommit in map(lambda n : int(n), os.listdir(f".grip/branches/{args[0]}")):
+            baseCommitNum = curBranchCommit
+            break
+    # below is a set of filenames of all the files in the base commit,
+    # cur commit, and targ commit
+    files = set().union(set(os.listdir(f".grip/commits/{baseCommitNum}")),
+                        set(os.listdir(f".grip/commits/{curCommitNum}")),
+                        set(os.listdir(f".grip/commits/{targCommitNum}")))
+
+    checkForLossOfWork(baseCommitNum, curCommitNum, targCommitNum)
+  
+    # At this point, no more errors can arise 
+    # copying over the commits made in the targetCommit after the base commit
+    fastForwardCommits = filter(lambda a : int(a) > baseCommitNum,
+        os.listdir(f".grip/branches/{args[0]}"))
+    for fastForwardCommit in fastForwardCommits:
+        src = f".grip/branches/{args[0]}/{fastForwardCommit}"
+        dest = f".grip/branches/{curBranch}/{fastForwardCommit}"
+        shutil.copytree(src, dest)
+  
+    # 4) Fast-forward: no commit created
+    # checking if it is a fastforward commit and
+    # making changes to the cwd and index accordingly
+    if (baseCommitNum == curCommitNum and targCommitNum >= curCommitNum):
+        doFastForward(baseCommitNum, curCommitNum, targCommitNum)
+
+    # 5) Commited as commit 'n'
+    # need to make an actual commit for this merge
+    makeMergeCommit(baseCommitNum, curCommitNum, targCommitNum)

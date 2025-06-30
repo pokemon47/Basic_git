@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+
+# This program was written by Asish Balasundaram (z5430777)
+# This file has the program that makes and initialises the .grip directory 
+# and the other directories within it
+# This will be necessary to ensure the functionality needed for grip  
+
+import sys,os
+
+if __name__ == "__main__":
+    # Need to check if .grip exists already, and only make one if it doesn't 
+    if (os.path.isdir('./.grip')):
+        print('grip-init: error: .grip already exists', file = sys.stderr)
+        sys.exit(1)
+
+    os.mkdir('.grip')
+    # A file within .grip that that contains the name of the branch
+    # that will be considered as our current working branch
+    fileWriter = open('.grip/_curBranch', 'w')
+    fileWriter.write('trunk')
+    fileWriter.close()
+
+    # A directory to keep track of all the commits made
+    os.mkdir('.grip/commits')
+
+    # A directory to keep track of all the branches made
+    os.mkdir('.grip/branches')
+    # Making the first branch, which is the 'trunk' branch
+    os.mkdir('.grip/branches/trunk')
+
+    # A directory to keep track of staged changes, which will be the index 
+    os.mkdir('.grip/index')
+
+    # Successful creation and initialisation of .grip message
+    print('Initialized empty grip repository in .grip')

@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+
+# This program was written by Asish Balasundaram (z5430777)
+# This file is the program that either creates a branch,
+# deletes a branch, or lists current branch names
+
+import sys, os, filecmp, shutil, re
+
+def branchDeletion(curBranch, targetBranch):
+    if (targetBranch == 'trunk'):
+        # The branch attempted to delete is the 'trunk' branch
+        print("grip-branch: error: can not delete branch 'trunk': default branch",
+            file = sys.stderr)
+        sys.exit(1)
+    elif (targetBranch == curBranch):
+        # The branch attempted to delete is the cur working branch
+        print(f"grip-branch: error: can not delete branch '{curBranch}': current branch",
+            file = sys.stderr)
+        sys.exit(1)
+    elif (targetBranch not in os.listdir('.grip/branches/')):
+        # The branch attempted to delete does not exist in the repository
+        print(f"grip-branch: error: branch '{targetBranch}' doesn't exist",
+            file = sys.stderr)
+        sys.exit(1)
+
+    lastTargCommitNum = str(sorted(map(lambda n : int(n)
+        , os.listdir(f".grip/branches/{targetBranch}")))[-1])
+    if (lastTargCommitNum not in os.listdir(f".grip/branches/{curBranch}")):
+        # The latest commit of the branch attempted to be deleted has not been
+        # merge into any other branch, this would cause a loss of work
+        print(f"grip-branch: error: branch '{targetBranch}' has unmerged changes",
+            file = sys.stderr)
+        sys.exit(1)
+    # If this point is reached,
+    # the branch can be deleted without loss of work or any other errors
+    shutil.rmtree(f".grip/branches/{targetBranch}")
+    print(f"Deleted branch '{targetBranch}'")
+
+
+if __name__ == "__main__":
+    if (not os.path.isdir('.grip')):
+        # The .grip dir does not exist.
+        print('grip-branch: error: grip repository directory .grip not found',
+            file = sys.stderr)
+        sys.exit(1)
+    elif (os.listdir('.grip/commits') == []):
+        # No commits have been made so far,
+        # this program requires atleast 1 commit to be made
+        print('grip-branch: error: this command can not be run until after the first commit',
+            file = sys.stderr)
+        sys.exit(1)
+
+    args = sys.argv[1:]
+    branchNamePattern = r'^[a-zA-Z0-9]{1}[a-zA-Z0-9._-]*$'
+
+    if ((len(args) > 2) or
+        (len(args) == 2 and args[0] != '-d') or
+        (len(args) == 1 and args[0] != '-d' and (not re.search(branchNamePattern, args[0]))) or
+        (len(args) == 2 and args[0] == '-d' and (not re.search(branchNamePattern, args[1])))):
+        # The input given was not well formed, does not match the expected format
+        print('usage: grip-branch [-d] <branch>', file = sys.stderr)
+        sys.exit(1)
+    elif ((len(args) == 1 and args[0] == '-d') or
+        (len(args) == 2 and args[0] == '-d' and args[1] == '-d')):
+        # The given input does not contain the branch name
+        print('grip-branch: error: branch name required', file = sys.stderr)
+        sys.exit(1)
+
+    if (len(args) == 0):
+        # No command line arguements were given
+        # so print out the names of all the branches in the repository
+        for branch in sorted(os.listdir('.grip/branches/')):
+            print(branch)
+        sys.exit(0)
+  
+    # Getting the current working branch name
+    curBranchReader = open('.grip/_curBranch')
+    curBranch = curBranchReader.readline()
+    curBranchReader.close()
+
+    if (len(args) == 1):
+        # Only one command line arguement was given, the branch name
+        # so we have to create a new branch with the given name
+        targetBranch = args[0]
+        if (targetBranch in os.listdir('.grip/branches/')):
+            # The given branch name already exists
+            print(f"grip-branch: error: branch '{targetBranch}' already exists",
+                file = sys.stderr)
+            sys.exit(1)
+        # The given branch name does not exist so make the new branch
+        shutil.copytree(f".grip/branches/{curBranch}", f".grip/branches/{targetBranch}")
+        sys.exit(0)
+  
+    # If this point is reached then it is definitely a branch deletion
+    branchDeletion(curBranch, args[1])

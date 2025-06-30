@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+
+# This program was written by Asish Balasundaram (z5430777)
+# This file is the program that switches branches,
+# if there would be no loss of work due to overwriting
+# Just to note:
+# 1) This program has been thoroughly tested (51 different cases)
+# 2) In this program, the file not existing is considered to be a version of the file
+
+import sys, os, filecmp, shutil
+
+# The function compares the versions of the two files and return a boolean
+# Note, the file not existing is also considered to be a version of the file
+def safeFileCmp(file1, file2):
+    # returns true, if both files don't exist or if both exist and have same content
+    return ((not (os.path.exists(file1) or os.path.exists(file2))) or
+        (os.path.exists(file1) and os.path.exists(file2) and filecmp.cmp(file1, file2, shallow = False)))
+
+# The function below removes a file only it exists
+def safeRemove(deleteFile):
+    if (os.path.exists(deleteFile)):
+        os.remove(deleteFile)
+
+
+def checkForLossOfWork(curCommitNum, targCommitNum, files):
+    errorFiles = []
+    # The for loop below skips the iteration of the loop,
+    # whenever it comes across one of the cases that would not cause loss of work
+    # few things to note:
+    # 1) cur commit refers to the latest commit of the current working branch
+    # 2) targ commit refers to the latest commit of the branch desired to switch to
+    for filename in sorted(list(files)):
+        curIndexFile = f".grip/index/{filename}"
+        curCommitFile = f".grip/commits/{curCommitNum}/{filename}"
+        targCommitFile = f".grip/commits/{targCommitNum}/{filename}"
+        if (safeFileCmp(targCommitFile, curCommitFile)):
+            # the version of the file in the current commit
+            # and the target commit is the same.
+            continue
+        elif ((not os.path.exists(filename)) and
+            (safeFileCmp(curIndexFile, curCommitFile) or safeFileCmp(curIndexFile, targCommitFile))):
+            # the file does not exist in the cwd and
+            # the version of the file in the index is the same as the one
+            # the cur commit or the targ commit
+            continue
+        elif ((safeFileCmp(filename, curIndexFile) and safeFileCmp(curIndexFile, curCommitFile)) or
+            (safeFileCmp(filename, curIndexFile) and safeFileCmp(curIndexFile, targCommitFile))):
+            # The version of the file is same in cwd, index, and cur commit
+            # or the version of the file is same in cwd, index, and targ commit
+            continue
+        elif (safeFileCmp(curIndexFile, targCommitFile) and
+            os.path.exists(curIndexFile) and
+            os.path.exists(targCommitFile)):
+            # The version of the file is same in cwd, index, and targ commit
+            # and the file exists in index and targ commit
+            continue
+        else:
+            # If this case is reached, all the cases that wouldn't cause an error
+            # has already been passed up. So the files that reach this case
+            # would definitely cause loss of work when switching branches
+            errorFiles.append(filename)
+
+    if (len(errorFiles) > 0):
+        # There is atleast one file that would cause an error
+        print('grip-checkout: error: Your changes to the following files would be overwritten by checkout:',
+            file = sys.stderr)
+        # Print out all files that would cause an error
+        for filename in errorFiles:
+            print(filename, file = sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    if (not os.path.isdir('.grip')):
+        # The .grip dir does not exist.
+        print('grip-checkout: error: grip repository directory .grip not found',
+            file = sys.stderr)
+        sys.exit(1)
+    elif (os.listdir('.grip/commits') == []):
+        # No commits have been made so far,
+        # this program requires atleast 1 commit to be made
+        print('grip-checkout: error: this command can not be run until after the first commit',
+            file = sys.stderr)
+        sys.exit(1)
+
+    args = sys.argv[1:]
+    if (len(args) != 1):
+        # The number of arguements given is not exactly 1
+        print('usage: grip-checkout <branch>',
+            file = sys.stderr)
+        sys.exit(1)
+    elif (args[0] not in os.listdir('.grip/branches')):
+        # The desired branch to switch to, does not exist in the repository
+        print(f"grip-checkout: error: unknown branch '{args[0]}'",
+            file = sys.stderr)
+        sys.exit(1)
+
+    targetBranch = args[0]
+    
+    # Getting the current working branch name
+    curBranchReader = open('.grip/_curBranch')
+    curBranch = curBranchReader.readline()
+    curBranchReader.close()
+
+    # The desired branch to switch to is the cur working branch
+    if (curBranch == targetBranch):
+        print(f"Already on '{targetBranch}'")
+        exit()
+
+
+    curCommitNum = sorted(map(lambda n : int(n), os.listdir(f".grip/branches/{curBranch}")))[-1]
+    targCommitNum = sorted(map(lambda n : int(n), os.listdir(f".grip/branches/{targetBranch}")))[-1]
+
+    files = set().union(set(filter(lambda a : not os.path.isdir(a),os.listdir())),
+                        set(os.listdir('.grip/index')),
+                        set(os.listdir(f".grip/commits/{curCommitNum}")),
+                        set(os.listdir(f".grip/commits/{targCommitNum}"))) 
+    checkForLossOfWork(curCommitNum, targCommitNum, files)
+
+    # If this point has been reached, that means there would be no loss of work if the checkout happens
+    for filename in sorted(list(files)):
+        curIndexFile = f".grip/index/{filename}"
+        curCommitFile = f".grip/commits/{curCommitNum}/{filename}"
+        targCommitFile = f".grip/commits/{targCommitNum}/{filename}"
+
+        if safeFileCmp(curCommitFile, targCommitFile):
+            continue
+        elif ((((not os.path.exists(filename)) and
+                (not safeFileCmp(curIndexFile, targCommitFile)) and
+                (safeFileCmp(curIndexFile, curCommitFile)))) or
+            (safeFileCmp(curIndexFile, curCommitFile) and 
+                safeFileCmp(filename, curIndexFile))):
+            # These are the cases that would cause the file to be
+            # overwritten when switching branches
+            # case 1:
+            # The file does not exist in cwd and
+            # the version of the file is the same in index and cur commit
+            # but not in index and the targ commit
+            # case 2:
+            # The version of the file is the same in cwd, index and cur commit
+            if (os.path.exists(targCommitFile)):
+                # The file exists in targ commit
+                shutil.copy(targCommitFile, curIndexFile)
+                shutil.copy(targCommitFile, filename)
+            else:
+                # The file does not exist in targ commit
+                safeRemove(curIndexFile)
+                safeRemove(filename)
+    # Change the current branch to the desired branch
+    fileWriter = open('.grip/_curBranch', 'w')
+    fileWriter.write(targetBranch)
+    fileWriter.close()
+
+    print(f"Switched to branch '{targetBranch}'")

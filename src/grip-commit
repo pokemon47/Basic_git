@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+
+# This program was written by Asish Balasundaram (z5430777)
+# This file is the program that creates a commit
+# This is done by taking a snapshot of the current index
+
+import sys, os, re, filecmp, shutil
+
+# The function below reverts the index to what it was
+# This is based on what was in the tempIndex dir
+# The tempIndex dir only exists if '-a' flag was given
+# The tempIndex dir is essentially the index but before staging changes
+def revertIndex():
+    if (not os.path.isdir('.grip/tempIndex')):
+        # The tempIndex dir does not exist so exit function
+        exit()
+
+    # The tempIndex does exists 
+    # so replace the contents of index with the contents of tempIndex
+    shutil.rmtree('.grip/index')
+    shutil.copytree('.grip/tempIndex', '.grip/index')
+    shutil.rmtree('.grip/tempIndex')
+
+# The function below is responsible for actually making the commit
+# This function is only called if there are no errors and commit is to be made
+def makeCommit(commitNum, commitMsg, branch):
+    # Taking a snapshot of the index and making a new commit
+    os.mkdir(f".grip/commits/{commitNum}")
+    for filename in os.listdir('.grip/index'):
+        shutil.copy(f".grip/index/{filename}", f".grip/commits/{commitNum}/{filename}")
+  
+    # Making the commit reference directory
+    os.mkdir(f".grip/branches/{branch}/{commitNum}")
+
+    # writing the path to the commit in the ref dir of the branch
+    commitPathRef = open(f".grip/branches/{branch}/{commitNum}/commitPath",'w')
+    commitPathRef.write(f".grip/branches/{branch}/{commitNum}")
+    commitPathRef.close()
+
+    # writing the commit message in the ref dir of the branch
+    commitMsgWriter = open(f".grip/branches/{branch}/{commitNum}/commitMsg",'w')
+    commitMsgWriter.write(commitMsg)
+    commitMsgWriter.close()
+    print(f"Committed as commit {commitNum}")
+
+    # A commit was made so delete the tempIndex if it was made
+    if os.path.exists('.grip/tempIndex'):
+        shutil.rmtree('.grip/tempIndex')
+    exit()
+
+
+# The function below checks if there is anything to commit
+# If there is a commit to be made, it calls the makeCommit function
+def checkAndInitiateCommit(commitMsg):
+    # An empty commits dir indicates that no commits have been made so far
+    if (os.listdir('.grip/commits') == []):
+        if (os.listdir('.grip/index') == []):
+            # If the index is empty, then there is nothing to commit so exit function
+            print('nothing to commit')
+            revertIndex()
+            exit()
+        # There is a commit to be made and its the first one
+        # After making the commit, exit the function
+        makeCommit(0, commitMsg, 'trunk')
+        exit()
+
+    # Now we address the case where there has been a commit made before
+    # Getting the current working branch name
+    curBranchReader = open('.grip/_curBranch')
+    curBranch = curBranchReader.readline()
+    curBranchReader.close()
+
+    # Getting the commit number of the latest commit in the current working branch
+    curCommitNum = sorted(map(lambda n : int(n), os.listdir(f".grip/branches/{curBranch}")))[-1]
+    # A list of files in the latest commit of the cur working branch
+    commitDirFiles = os.listdir(f".grip/commits/{curCommitNum}")
+    # A list of files in the index currently
+    indexFiles = os.listdir('.grip/index')
+
+    # Now we have to check for differences 
+    # between the files in the index and the latest commit of the working branch
+    
+    isChanged = False
+    if (len(indexFiles) != len(commitDirFiles)):
+        # Number of files in the dirs are different so there is changes to be committed
+        isChanged = True
+    elif (sorted(indexFiles) != sorted(commitDirFiles)):
+        # Number of files in the dirs are same 
+        # but the Filenames are different so there is changes to be committed
+        isChanged = True
+    else:
+        # In this case the number of files and filenames in both dirs are the same
+        # check if the contents of atleast one file differ
+        for filename in indexFiles:
+            isChanged = isChanged or (not (filecmp.cmp(f".grip/index/{filename}",
+                f".grip/commits/{curCommitNum}/{filename}", shallow=False)))
+
+    if (isChanged == False):
+        # The is no difference between
+        # the index and the latest commit of the cur working branch
+        # So there is nothing to commit so exit the function
+        print('nothing to commit')
+        revertIndex()
+        exit()
+
+    # If this point is reached, there is actually something to commit and this is not the first commit made to the repo
+    lastCommit = sorted(map(lambda n : int(n), os.listdir('.grip/commits')))[-1]
+    makeCommit(lastCommit + 1, commitMsg, curBranch)
+
+if __name__ == "__main__":
+    # Need to check if .grip exists, and only continue if it does 
+    if (not os.path.isdir('.grip')):
+        print('grip-commit: error: grip repository directory .grip not found',
+            file = sys.stderr)
+        sys.exit(1)
+  
+    # Now we have to do some error checking
+    # additional step needed since (-m"commit msg") and (-m "commit msg") are valid
+    commitMsg = ''
+    commandLineArgs = ''
+    for arg in sys.argv[1:]:
+        commandLineArgs += arg
+
+    if (sys.argv[1] == '-a'):
+        # The '-a' flag was given, need to stage the changes first and then commit 
+        commandLineArgs = commandLineArgs[2:]
+
+        # Need to check for error in the input for when '-a' is given
+        if (commandLineArgs[0] != '-' or
+            commandLineArgs[1] != 'm' or
+            len(sys.argv[2:]) > 2 or
+            len(commandLineArgs[2:]) == 0):
+            # The input given was not well formed, does not match the expected format
+            print('usage: grip-commit [-a] -m commit-message', file = sys.stderr)
+            sys.exit(1)
+    
+        # If this point is reached, there is no errors in the input given
+        # now need to stage the changes first first then make commit
+        
+        # making a temp index if there is nothing to commit at the end
+        # this will help us revert the changes staged by this program 
+        if os.path.exists('.grip/tempIndex'):
+            shutil.rmtree('.grip/tempIndex')
+            shutil.copytree('.grip/index', '.grip/tempIndex')
+
+        # Now doing the actually staging of changed from cwd to index
+        for filename in os.listdir('.grip/index'):
+            if ((filename not in os.listdir()) or (os.path.isdir(filename))):
+                os.remove(f".grip/index/{filename}")
+            else:
+                shutil.copy(filename, f".grip/index/{filename}")
+
+    # Some more input error checking
+    if (commandLineArgs[0] != '-' or
+        commandLineArgs[1] != 'm' or
+        (sys.argv[1] != '-a' and len(sys.argv[1:]) > 2) or
+        (sys.argv[1] == '-a' and len(sys.argv[1:]) > 3) or
+        len(commandLineArgs[2:]) == 0):
+        revertIndex()
+        print('usage: grip-commit [-a] -m commit-message', file = sys.stderr)
+        sys.exit(1)
+    else:
+        # No errors in the input given
+        # Check if there is anything to commit and make a commit if there is
+        commitMsg = commandLineArgs[2:]
+        checkAndInitiateCommit(commitMsg)

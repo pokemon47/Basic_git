@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+
+# This program was written by Asish Balasundaram (z5430777)
+# This file is the program that prints out a file
+# from the index or any one of the commits made so far 
+
+import sys, os, re
+
+# The function belows takes in a path to a file or a filename
+# and then prints out the content of the file
+def filePrinter(src):
+    fileReader = open(src)
+    for line in fileReader:
+        print(line, end="")
+
+if __name__ == "__main__":
+    # Need to check if .grip exists, and only continue if it does 
+    if (not os.path.isdir('.grip')):
+        print('grip-show: error: grip repository directory .grip not found', file = sys.stderr)
+        sys.exit(1)
+    elif ((len(sys.argv[1:]) != 1) or (':' not in sys.argv[1])):
+        # The input given was not well formed, does not match the expected format
+        print('usage: grip-show <commit>:<filename>', file = sys.stderr)
+        sys.exit(1)
+
+    # Getting the commit number and the filename of the file to be printed
+    commitNum = sys.argv[1].split(':', 1)[0]
+    targetFilename = sys.argv[1].split(':', 1)[1]
+
+    if (not re.search(r'^[a-zA-Z0-9]{1}[a-zA-Z0-9._-]*$', targetFilename)):
+        # The filename given is a not a valid file name that would be in grip
+        print(f"grip-show: error: invalid filename '{targetFilename}'",
+            file = sys.stderr)
+        sys.exit(1)
+
+    if (commitNum == ''):
+        # commit number has been omitted
+        # so search for the file in the index and then print it out if found
+        if (targetFilename not in os.listdir('.grip/index')):
+            # There is no file in the index that matched the filename given
+            # so print error message and exit the program with code 1
+            print(f"grip-show: error: '{targetFilename}' not found in index",
+                file = sys.stderr)
+            sys.exit(1)
+        filePrinter(f".grip/index/{targetFilename}")
+        # Contents of the desired file has been printed, exit program with code 0 
+        exit()
+
+
+    if (commitNum not in os.listdir('.grip/commits')):
+        # The given commit number does not match any of the commits made so far
+        print(f"grip-show: error: unknown commit '{commitNum}'", file = sys.stderr)
+        sys.exit(1)
+    elif (targetFilename not in os.listdir(f".grip/commits/{commitNum}")):
+        # There is no file in the desired commit that matched the filename given
+        print(f"grip-show: error: '{targetFilename}' not found in commit {commitNum}",
+            file = sys.stderr)
+        sys.exit(1)
+    # There is a file that matches the filename given in the desired commit
+    # so we can now print out the contents of that file now
+    filePrinter(f".grip/commits/{commitNum}/{targetFilename}")
+
+
+

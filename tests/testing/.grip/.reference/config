@@ -1,0 +1,9 @@
+[core]
+	repositoryformatversion = 0
+	fileMode = false
+	bare = false
+	logallrefupdates = true
+	worktree = /import/ravel/2/z5430777/COMP2041/assignments/ass2/testing
+[user]
+	email = grip@example.com
+	name = grip
